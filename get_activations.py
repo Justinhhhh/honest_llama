@@ -7,8 +7,10 @@ import pickle
 from utils import get_llama_activations_bau, tokenized_tqa, tokenized_tqa_gen, tokenized_tqa_gen_end_q
 import llama
 import pickle
-import argparse
-
+import hf_olmo
+from argparse import ArgumentParser
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import LlamaForCausalLM, LlamaTokenizer
 HF_NAMES = {
     'llama_7B': 'baffo32/decapoda-research-llama-7B-hf',
     'honest_llama_7B': 'validation/results_dump/llama_7B_seed_42_top_48_heads_alpha_15',
@@ -17,6 +19,8 @@ HF_NAMES = {
     'llama2_chat_7B': 'meta-llama/Llama-2-7b-chat-hf', 
     'llama2_chat_13B': 'meta-llama/Llama-2-13b-chat-hf', 
     'llama2_chat_70B': 'meta-llama/Llama-2-70b-chat-hf', 
+    'OLMo_7B': 'allenai/OLMo-7B',
+    'OLMo_7B_SFT': 'allenai/OLMo-7B-SFT'
 }
 
 def main(): 
@@ -26,8 +30,8 @@ def main():
     validation set for the specified dataset on the last token for llama-7B. 
     """
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('model_name', type=str, default='llama_7B')
+    parser = ArgumentParser()
+    parser.add_argument('model_name', type=str, default='allenai/OLMo-7B')
     parser.add_argument('dataset_name', type=str, default='tqa_mc2')
     parser.add_argument('--device', type=int, default=0)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
@@ -35,18 +39,20 @@ def main():
 
     MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir
 
-    tokenizer = llama.LlamaTokenizer.from_pretrained(MODEL)
-    model = llama.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float16, device_map="auto")
+    tokenizer = hf_olmo.OLMoTokenizerFast.from_pretrained(MODEL)
+    model = hf_olmo.OLMoForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float16, device_map="auto")
+    # tokenizer = llama.LlamaTokenizer.from_pretrained(MODEL)
+    # model = llama.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float16, device_map="auto")
     device = "cuda"
 
     if args.dataset_name == "tqa_mc2": 
-        dataset = load_dataset("truthful_qa", "multiple_choice")['validation']
+        dataset = load_dataset("truthful_qa/multiple_choice")['validation']
         formatter = tokenized_tqa
     elif args.dataset_name == "tqa_gen": 
-        dataset = load_dataset("truthful_qa", 'generation')['validation']
+        dataset = load_dataset("truthful_qa/generation")['validation']
         formatter = tokenized_tqa_gen
     elif args.dataset_name == 'tqa_gen_end_q': 
-        dataset = load_dataset("truthful_qa", 'generation')['validation']
+        dataset = load_dataset("truthful_qa/generation")['validation']
         formatter = tokenized_tqa_gen_end_q
     else: 
         raise ValueError("Invalid dataset name")
@@ -61,13 +67,13 @@ def main():
 
     all_layer_wise_activations = []
     all_head_wise_activations = []
-
     print("Getting activations")
+    i =0
     for prompt in tqdm(prompts):
         layer_wise_activations, head_wise_activations, _ = get_llama_activations_bau(model, prompt, device)
         all_layer_wise_activations.append(layer_wise_activations[:,-1,:])
         all_head_wise_activations.append(head_wise_activations[:,-1,:])
-
+    
     print("Saving labels")
     np.save(f'features/{args.model_name}_{args.dataset_name}_labels.npy', labels)
 
